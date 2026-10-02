@@ -1,0 +1,16 @@
+# Umbriel desktop session configuration.
+# Documentation: https://docs.noctalia.dev/umbriel/configuration/
+# Edit the focused files under conf.d/; their order sets precedence.
+[include]
+files = [
+    "conf.d/session.toml",
+    "conf.d/outputs.toml",
+    "conf.d/input.toml",
+    "conf.d/appearance.toml",
+    "conf.d/layout.toml",
+    "conf.d/keybinds.toml",
+    "conf.d/rules.toml",
+    ]
+
+[include.optional]
+files = ["noctalia.toml"]

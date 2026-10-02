@@ -1,0 +1,9 @@
+[Unit]
+Description=Automount Synology Home
+
+[Automount]
+Where=/mnt/synology/home
+TimeoutIdleSec=10min
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,13 @@
+[core]
+	editor = zeditor --wait
+[init]
+	defaultBranch = main
+[user]
+	name = Stephen Liles
+	email = shinobiaoshi@gmail.com
+[push]
+	autoSetupRemote = true
+[merge]
+	conflictstyle = zdiff3
+[diff]
+	algorithm = histogram

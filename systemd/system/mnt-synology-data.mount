@@ -1,0 +1,11 @@
+[Unit]
+Description=Synology Data
+Wants=network-online.target
+After=network-online.target
+
+[Mount]
+What=192.168.10.20:/volume1/data
+Where=/mnt/synology/data
+Type=nfs
+Options=rsize=131072,wsize=131072
+TimeoutSec=10

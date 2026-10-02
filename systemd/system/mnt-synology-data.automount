@@ -1,0 +1,9 @@
+[Unit]
+Description=Automount Synology Data
+
+[Automount]
+Where=/mnt/synology/data
+TimeoutIdleSec=10min
+
+[Install]
+WantedBy=multi-user.target

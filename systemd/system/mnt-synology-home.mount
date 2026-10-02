@@ -1,0 +1,11 @@
+[Unit]
+Description=Synology Home
+Wants=network-online.target
+After=network-online.target
+
+[Mount]
+What=192.168.10.20:/volume1/homes/ShinobiAoshi
+Where=/mnt/synology/home
+Type=nfs
+Options=rsize=131072,wsize=131072
+TimeoutSec=10

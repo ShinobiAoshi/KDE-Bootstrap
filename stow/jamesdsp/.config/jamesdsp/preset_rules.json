@@ -1,0 +1,51 @@
+[
+    {
+        "deviceId": "alsa_card.usb-Schiit_Audio_Schiit_Magni_Unity-00",
+        "deviceName": "Schiit Magni Unity",
+        "preset": "Sennheiser 6xx",
+        "routeId": "*",
+        "routeName": "<any output route>"
+    },
+    {
+        "deviceId": "alsa_card.usb-Vanatoo_Vanatoo_T0P_CTUA170405-00",
+        "deviceName": "Vanatoo T0P",
+        "preset": "Off",
+        "routeId": "*",
+        "routeName": "<any output route>"
+    },
+    {
+        "deviceId": "alsa_card.usb-Logitech_A50-00",
+        "deviceName": "A50",
+        "preset": "Off",
+        "routeId": "*",
+        "routeName": "<any output route>"
+    },
+    {
+        "deviceId": "alsa_card.usb-Generic_USB_Audio_20210726905926-00",
+        "deviceName": "AB13X Headset Adapter",
+        "preset": "Off",
+        "routeId": "*",
+        "routeName": "<any output route>"
+    },
+    {
+        "deviceId": "alsa_card.pci-0000_0e_00.1",
+        "deviceName": "Radeon High Definition Audio Controller",
+        "preset": "Off",
+        "routeId": "*",
+        "routeName": "<any output route>"
+    },
+    {
+        "deviceId": "alsa_card.usb-Generic_USB_Audio-00",
+        "deviceName": "USB Audio",
+        "preset": "Off",
+        "routeId": "*",
+        "routeName": "<any output route>"
+    },
+    {
+        "deviceId": "alsa_card.pci-0000_01_00.1",
+        "deviceName": "AD102 High Definition Audio Controller",
+        "preset": "Off",
+        "routeId": "*",
+        "routeName": "<any output route>"
+    }
+]

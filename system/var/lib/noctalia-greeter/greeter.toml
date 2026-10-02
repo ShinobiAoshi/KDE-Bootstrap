@@ -1,0 +1,26 @@
+[session]
+default = "Umbriel"
+
+[appearance]
+scheme = "Synced"
+theme_mode = "dark"
+font_family = "Inter"
+password_style = "default"
+power_buttons_position = "bottom-right"
+scheme_selector_position = "top-right"
+
+[idle]
+timeout = 300
+
+[cursor]
+theme = "capitaine-cursors"
+size = 24
+path = "/usr/share/icons"
+
+[keyboard]
+layout = "us"
+numlock = true
+
+[auth]
+allow_empty_password = false
+request_timeout = 60

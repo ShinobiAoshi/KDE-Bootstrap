@@ -1,0 +1,7 @@
+# ZSH junk
+.zcompdump*
+.zsh-update
+.zhistory
+stow/zed/.config/zed/themes/noctalia.json
+stow/ghostty/.config/ghostty/themes/noctalia
+stow/fastfetch/.config/fastfetch/themes/noctalia.jsonc

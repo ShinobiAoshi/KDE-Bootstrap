@@ -1,0 +1,351 @@
+[shell]
+polkit_agent = true
+telemetry_enabled = false
+clipboard_enabled = true
+clipboard_history_max_entries = 20
+clipboard_keep_from_closed_apps = true
+
+[shell.launcher]
+pinned = []
+
+[shell.screenshot]
+save_to_file = true
+directory = "~/Pictures/Screenshots"
+copy_to_clipboard = true
+freeze_screen = true
+
+[audio]
+enable_sounds = true
+sound_theme = "modern-minimal-ui-sounds"
+
+[wallpaper]
+enabled = true
+directory = "/home/shinobiaoshi/Pictures/Wallpapers/Landscape/Hatsune Miku"
+fill_mode = "crop"
+
+[wallpaper.automation]
+enabled = true
+
+[theme]
+mode = "dark"
+source = "wallpaper"
+wallpaper_scheme = "m3-content"
+
+# Keep the compositor and toolkit colors synchronized with Noctalia. The
+# built-in Umbriel template renders noctalia.toml and maintains its include.
+[theme.templates]
+enable_builtin_templates = true
+builtin_ids = ["gtk3", "gtk4", "ghostty", "qt", "umbriel"]
+
+[idle]
+behavior_order = ["lock", "screen-off", "suspend"]
+
+[idle.behavior.lock]
+timeout = 0
+action = "lock"
+enabled = false
+
+[idle.behavior.screen-off]
+timeout = 0
+action = "screen_off"
+enabled = false
+
+[idle.behavior.suspend]
+timeout = 0
+action = "lock_and_suspend"
+enabled = false
+
+[bar]
+order = ["main"]
+
+[bar.main]
+enabled = true
+position = "top"
+auto_hide = true
+smart_auto_hide = false
+show_on_workspace_switch = true
+reserve_space = false
+start = ["workspaces", "active_window"]
+center = ["clock"]
+end = ["cpu-usage", "cpu-temp", "gpu-usage", "gpu-temp", "memory", "tray", "network", "bluetooth", "volume", "notifications", "session"]
+
+[widget.clock]
+format = "{:%-I:%M %p · %a, %b %-d}"
+
+[widget.cpu-usage]
+type = "sysmon"
+stat = "cpu_usage"
+visualization = "none"
+
+[widget.cpu-temp]
+type = "sysmon"
+stat = "cpu_temp"
+visualization = "none"
+
+[widget.gpu-usage]
+type = "sysmon"
+stat = "gpu_usage"
+visualization = "none"
+
+[widget.gpu-temp]
+type = "sysmon"
+stat = "gpu_temp"
+visualization = "none"
+
+[widget.memory]
+type = "sysmon"
+stat = "ram_pct"
+visualization = "none"
+
+[dock]
+enabled = true
+position = "bottom"
+auto_hide = true
+smart_auto_hide = false
+reserve_space = false
+show_running = true
+pinned = ["org.gnome.Nautilus", "com.mitchellh.ghostty", "brave-origin", "vesktop", "steam"]
+
+[notification]
+enable_daemon = true
+position = "top_right"
+keep_dismissed_in_history = true
+filter_order = [
+    "waydroid-01",
+    "waydroid-02",
+    "waydroid-03",
+    "waydroid-04",
+    "waydroid-05",
+    "waydroid-06",
+    "waydroid-07",
+    "waydroid-08",
+    "waydroid-09",
+    "waydroid-10",
+    "waydroid-11",
+    "waydroid-12",
+    "waydroid-13",
+    "waydroid-14",
+    "waydroid-15",
+    "waydroid-16",
+    "waydroid-17",
+    "waydroid-18",
+    "waydroid-19",
+    "waydroid-20",
+    "waydroid-21",
+    "waydroid-22",
+    "standard-duration",
+]
+
+# Noctalia matches desktop-entry values exactly, so list each installed Waydroid app.
+[notification.filter.waydroid-01]
+enabled = true
+match = "waydroid.android"
+show_toast = false
+save_history = false
+play_sound = false
+
+[notification.filter.waydroid-02]
+enabled = true
+match = "waydroid.com.android.calculator2"
+show_toast = false
+save_history = false
+play_sound = false
+
+[notification.filter.waydroid-03]
+enabled = true
+match = "waydroid.com.android.deskclock"
+show_toast = false
+save_history = false
+play_sound = false
+
+[notification.filter.waydroid-04]
+enabled = true
+match = "waydroid.com.android.documentsui"
+show_toast = false
+save_history = false
+play_sound = false
+
+[notification.filter.waydroid-05]
+enabled = true
+match = "waydroid.com.android.gallery3d"
+show_toast = false
+save_history = false
+play_sound = false
+
+[notification.filter.waydroid-06]
+enabled = true
+match = "waydroid.com.android.providers.downloads"
+show_toast = false
+save_history = false
+play_sound = false
+
+[notification.filter.waydroid-07]
+enabled = true
+match = "waydroid.com.android.settings"
+show_toast = false
+save_history = false
+play_sound = false
+
+[notification.filter.waydroid-08]
+enabled = true
+match = "waydroid.com.android.vending"
+show_toast = false
+save_history = false
+play_sound = false
+
+[notification.filter.waydroid-09]
+enabled = true
+match = "waydroid.com.aniplex.fategrandorder.en"
+show_toast = false
+save_history = false
+play_sound = false
+
+[notification.filter.waydroid-10]
+enabled = true
+match = "waydroid.com.google.android.apps.messaging"
+show_toast = false
+save_history = false
+play_sound = false
+
+[notification.filter.waydroid-11]
+enabled = true
+match = "waydroid.com.google.android.contacts"
+show_toast = false
+save_history = false
+play_sound = false
+
+[notification.filter.waydroid-12]
+enabled = true
+match = "waydroid.com.google.android.gms"
+show_toast = false
+save_history = false
+play_sound = false
+
+[notification.filter.waydroid-13]
+enabled = true
+match = "waydroid.com.google.android.setupwizard"
+show_toast = false
+save_history = false
+play_sound = false
+
+[notification.filter.waydroid-14]
+enabled = true
+match = "waydroid.io.github.fate_grand_automata"
+show_toast = false
+save_history = false
+play_sound = false
+
+[notification.filter.waydroid-15]
+enabled = true
+match = "waydroid.moe.shizuku.privileged.api"
+show_toast = false
+save_history = false
+play_sound = false
+
+[notification.filter.waydroid-16]
+enabled = true
+match = "waydroid.org.lineageos.aperture"
+show_toast = false
+save_history = false
+play_sound = false
+
+[notification.filter.waydroid-17]
+enabled = true
+match = "waydroid.org.lineageos.eleven"
+show_toast = false
+save_history = false
+play_sound = false
+
+[notification.filter.waydroid-18]
+enabled = true
+match = "waydroid.org.lineageos.etar"
+show_toast = false
+save_history = false
+play_sound = false
+
+[notification.filter.waydroid-19]
+enabled = true
+match = "waydroid.org.lineageos.jelly"
+show_toast = false
+save_history = false
+play_sound = false
+
+[notification.filter.waydroid-20]
+enabled = true
+match = "waydroid.org.lineageos.recorder"
+show_toast = false
+save_history = false
+play_sound = false
+
+[notification.filter.waydroid-21]
+enabled = true
+match = "waydroid.ru.zdevs.zarchiver"
+show_toast = false
+save_history = false
+play_sound = false
+
+[notification.filter.waydroid-22]
+enabled = true
+match = "waydroid.com.android.shell"
+show_toast = false
+save_history = false
+play_sound = false
+
+[notification.filter.standard-duration]
+enabled = true
+match_content = ".*"
+show_toast = true
+save_history = true
+play_sound = true
+allow_permanent = false
+override_duration = 5000
+
+[system.monitor]
+enabled = true
+
+[weather]
+enabled = true
+refresh_minutes = 30
+unit = "imperial"
+
+[location]
+auto_locate = false
+address = "Austin, TX"
+
+[nightlight]
+enabled = true
+force = false
+temperature_day = 6500
+temperature_night = 2700
+
+[calendar]
+enabled = false
+refresh_minutes = 15
+
+[calendar.account.google]
+type = "google"
+name = "Google"
+
+[[control_center.shortcuts]]
+type = "wifi"
+
+[[control_center.shortcuts]]
+type = "bluetooth"
+
+[[control_center.shortcuts]]
+type = "nightlight"
+
+[[control_center.shortcuts]]
+type = "notification"
+
+[[control_center.shortcuts]]
+type = "audio"
+
+[[control_center.shortcuts]]
+type = "session"
+
+# Noctalia does not expose a session-only clipboard-history setting. Clearing
+# unpinned entries at shell startup prevents history from carrying across a
+# reboot or shell restart while preserving Secret Service for Google Calendar.
+[hooks]
+started = "noctalia msg clipboard-clear"

@@ -1,0 +1,20 @@
+[output."Dell Inc. AW3926QW 4FCP6K4"]
+mode = "5120x2160@165"
+scale = 1.25
+transform = "normal"
+workspaces = "dynamic"
+workspace_axis = "vertical" # The scrolling strip is perpendicular: horizontal columns.
+vrr = "fullscreen"
+tearing = false
+direct_scanout = false
+hdr = "auto"
+sdr_white = 203
+bit_depth = 10
+
+[[workspace]]
+name = "Games"
+output = "Dell Inc. AW3926QW 4FCP6K4"
+
+[[workspace]]
+name = "Waydroid"
+output = "HDMI-A-1"
