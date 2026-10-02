@@ -1,16 +1,14 @@
 amethyst-mod-manager
 android-studio
 appimagelauncher
+cliamp
 filebot
 jamesdsp
 maplemononormal-nf
 opendeck-bin
 penguin-burner
-qt6ct-kde
 rustdesk-bin
 sgdboop-bin
 termius
-umbriel-git
 upscayl-bin
-xdg-desktop-portal-umbriel-git
 xivlauncher-rb

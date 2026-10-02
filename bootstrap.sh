@@ -9,24 +9,13 @@ readonly AUR_MANIFEST="$REPO_DIR/packages/arch/aur.txt"
 readonly FLATPAK_MANIFEST="$REPO_DIR/packages/flatpak.txt"
 readonly SYSTEMD_UNIT_DIR="$REPO_DIR/systemd/system"
 readonly STOW_DIR="$REPO_DIR/stow"
-readonly GREETD_CONFIG_SOURCE="$REPO_DIR/system/etc/greetd/config.toml"
-readonly GREETD_CONFIG_TARGET="/etc/greetd/config.toml"
-readonly GREETD_PAM_SOURCE="$REPO_DIR/system/etc/pam.d/greetd"
-readonly GREETD_PAM_TARGET="/etc/pam.d/greetd"
-readonly GREETER_CONFIG_SOURCE="$REPO_DIR/system/var/lib/noctalia-greeter/greeter.toml"
-readonly GREETER_CONFIG_TARGET="/var/lib/noctalia-greeter/greeter.toml"
-readonly NSSWITCH_CONFIG="/etc/nsswitch.conf"
 readonly HYDRO_PLUGIN="jorgebucaran/hydro"
+readonly -a STOW_PACKAGES=(MangoHud brave cliamp environment.d fastfetch fish ghostty git jamesdsp ssh zed)
+readonly -a KDE_BASELINE=(cachyos-kde-settings plasma-desktop plasma-workspace plasma-login-manager xdg-desktop-portal xdg-desktop-portal-kde kwallet-pam)
 
 readonly -a DESKTOP_SERVICES=(
     avahi-daemon.service
-    bluetooth.service
     cups.socket
-    ufw.service
-)
-
-readonly -a DESKTOP_USER_SERVICES=(
-    psd.service
 )
 
 readonly -a SYNOLOGY_UNITS=(
@@ -46,7 +35,6 @@ skip_dotfiles=false
 skip_system_config=false
 skip_mounts=false
 logout_recommended=false
-reboot_recommended=false
 
 log() {
     printf '\n\033[1;34m==>\033[0m %s\n' "$*"
@@ -70,7 +58,7 @@ Restore packages, Flatpaks, dotfiles, system configuration, and Synology automou
 Options:
   --skip-packages       Skip packages, Flatpaks, and user environment setup
   --skip-dotfiles       Skip GNU Stow dotfile deployment
-  --skip-system-config  Skip greetd, greeter, and desktop service setup
+  --skip-system-config  Skip printer discovery and shared service setup
   --skip-mounts         Skip Synology systemd unit installation
   -h, --help            Show this help
 EOF
@@ -135,17 +123,33 @@ load_stow_packages() {
     local -n stow_packages_ref=$1
 
     [[ -d $STOW_DIR ]] || die "Stow directory not found: $STOW_DIR"
-    mapfile -t stow_packages_ref < <(
-        find "$STOW_DIR" -mindepth 1 -maxdepth 1 -type d \
-            ! -name vicinae \
-            ! -name zsh \
-            -printf '%f\n' |
-            LC_ALL=C sort
-    )
-    ((${#stow_packages_ref[@]} > 0)) || die "No Stow packages found in $STOW_DIR."
+    stow_packages_ref=("${STOW_PACKAGES[@]}")
+    local package
+    for package in "${stow_packages_ref[@]}"; do
+        [[ -d $STOW_DIR/$package ]] || die "Active Stow package missing: $package"
+    done
+}
+
+check_kde_baseline() {
+    require_command pacman
+    require_command systemctl
+    local package
+    for package in "${KDE_BASELINE[@]}"; do
+        pacman -Q "$package" >/dev/null 2>&1 || die "CachyOS KDE baseline package missing: $package"
+    done
+    require_file /usr/share/wayland-sessions/plasma.desktop
+    require_file /usr/share/xdg-desktop-portal/portals/kde.portal
+    require_file /usr/lib/systemd/system/plasmalogin.service
+    require_file /usr/lib/pam.d/plasmalogin
+    check_display_manager_conflict
 }
 
 preflight() {
+    local -a aur_packages=()
+    local -a synology_unit_paths=()
+    local unit
+    local validation_output
+
     [[ $EUID -ne 0 ]] || die "Run this script as your normal user, not as root."
     require_file /etc/os-release
 
@@ -153,57 +157,82 @@ preflight() {
     source /etc/os-release
     [[ ${ID:-} == cachyos ]] || die \
         "This package manifest targets CachyOS; detected '${PRETTY_NAME:-unknown}'."
+    check_kde_baseline
+
+    if ! $skip_packages || ! $skip_system_config || ! $skip_mounts; then
+        require_command sudo
+    fi
 
     if ! $skip_packages; then
-        require_command sudo
-        require_command pacman
+        require_command awk
+        require_command chsh
+        require_command getent
+        require_command xdg-mime
+        require_command xdg-user-dirs-update
         require_file "$PACMAN_MANIFEST"
         require_file "$AUR_MANIFEST"
         require_file "$FLATPAK_MANIFEST"
+        load_manifest "$AUR_MANIFEST" aur_packages
+        if ((${#aur_packages[@]} > 0)); then
+            require_command paru
+            require_command git
+        fi
     fi
 
     if ! $skip_dotfiles; then
         local -a stow_packages=()
         load_stow_packages stow_packages
+        if $skip_packages; then
+            require_command stow
+        fi
     fi
 
     if ! $skip_system_config; then
-        require_command sudo
-        require_command readlink
-        require_file "$GREETD_CONFIG_SOURCE"
-        require_file "$GREETD_PAM_SOURCE"
-        require_file "$GREETER_CONFIG_SOURCE"
-        check_display_manager_conflict
+        if $skip_packages; then
+            require_command lpinfo
+        fi
     fi
 
     if ! $skip_mounts; then
-        require_command sudo
+        require_command cmp
+        require_command mount.nfs
+        require_command systemd-analyze
         for unit in "${SYNOLOGY_UNITS[@]}"; do
             require_file "$SYSTEMD_UNIT_DIR/$unit"
+            synology_unit_paths+=("$SYSTEMD_UNIT_DIR/$unit")
         done
+        if ! validation_output=$(systemd-analyze verify "${synology_unit_paths[@]}" 2>&1); then
+            die "Synology unit validation failed: $validation_output"
+        fi
+    fi
+}
+
+install_bootstrap_dependencies() {
+    if $skip_dotfiles; then
+        log "Updating CachyOS"
+        sudo pacman -Syu
+    else
+        log "Updating CachyOS and installing Stow"
+        sudo pacman -Syu --needed stow
+        require_command stow
     fi
 }
 
 install_packages() {
-    local -a bootstrap_packages=(base-devel fish git stow flatpak networkmanager paru tealdeer)
     local -a pacman_packages=()
     local -a aur_packages=()
     local -a flatpak_apps=()
-
-    if ! $skip_mounts; then
-        bootstrap_packages+=(nfs-utils)
-    fi
 
     load_manifest "$PACMAN_MANIFEST" pacman_packages
     load_manifest "$AUR_MANIFEST" aur_packages
     load_manifest "$FLATPAK_MANIFEST" flatpak_apps
 
-    log "Updating CachyOS and installing bootstrap dependencies"
-    sudo pacman -Syu --needed "${bootstrap_packages[@]}"
-
-    if ((${#pacman_packages[@]} > 0)); then
-        log "Installing ${#pacman_packages[@]} repository packages"
-        sudo pacman -S --needed "${pacman_packages[@]}"
+    log "Installing Fish, Flatpak, and ${#pacman_packages[@]} repository packages"
+    sudo pacman -S --needed fish flatpak "${pacman_packages[@]}"
+    require_command fish
+    require_command flatpak
+    if ! $skip_system_config; then
+        require_command lpinfo
     fi
 
     if ((${#aur_packages[@]} > 0)); then
@@ -249,11 +278,11 @@ configure_user_environment() {
     xdg-user-dirs-update
 
     log "Setting desktop application defaults"
-    xdg-mime default org.gnome.Nautilus.desktop inode/directory
+    xdg-mime default org.kde.dolphin.desktop inode/directory
     xdg-mime default brave-origin.desktop x-scheme-handler/http
     xdg-mime default brave-origin.desktop x-scheme-handler/https
     xdg-mime default brave-origin.desktop text/html
-    xdg-mime default org.gnome.Papers.desktop application/pdf
+    xdg-mime default org.kde.okular.desktop application/pdf
 
     local mime_type
     for mime_type in \
@@ -264,18 +293,22 @@ configure_user_environment() {
         image/svg+xml \
         image/tiff \
         image/webp; do
-        xdg-mime default org.gnome.Loupe.desktop "$mime_type"
+        xdg-mime default org.kde.gwenview.desktop "$mime_type"
     done
 
-    for mime_type in \
-        audio/flac \
-        audio/mp4 \
-        audio/mpeg \
-        audio/ogg \
-        audio/x-vorbis+ogg \
-        audio/x-wav; do
-        xdg-mime default io.bassi.Amberol.desktop "$mime_type"
-    done
+    if ! $skip_dotfiles; then
+        for mime_type in \
+            audio/flac \
+            audio/mp4 \
+            audio/mpeg \
+            audio/ogg \
+            audio/x-vorbis+ogg \
+            audio/x-wav; do
+            xdg-mime default cliamp.desktop "$mime_type"
+        done
+    else
+        warn "Audio MIME defaults need the Stow-managed cliamp launcher; skipping them."
+    fi
 
     for mime_type in \
         video/mp4 \
@@ -283,7 +316,7 @@ configure_user_environment() {
         video/webm \
         video/x-matroska \
         video/x-msvideo; do
-        xdg-mime default io.github.celluloid_player.Celluloid.desktop \
+        xdg-mime default org.kde.haruna.desktop \
             "$mime_type"
     done
 
@@ -303,7 +336,7 @@ configure_user_environment() {
         application/x-xz \
         application/x-xz-compressed-tar \
         application/zip; do
-        xdg-mime default org.gnome.FileRoller.desktop "$mime_type"
+        xdg-mime default org.kde.ark.desktop "$mime_type"
     done
 
     xdg-mime default dev.zed.Zed.desktop application/x-zerosize
@@ -329,7 +362,7 @@ configure_fish_plugins() {
     fi
 }
 
-deploy_dotfiles() {
+check_stow_conflicts() {
     require_command stow
 
     local -a stow_packages=()
@@ -345,10 +378,6 @@ deploy_dotfiles() {
     mkdir -p \
         "$HOME/.config/jamesdsp/irs" \
         "$HOME/.config/jamesdsp/presets" \
-        "$HOME/.config/gtk-3.0" \
-        "$HOME/.config/gtk-4.0" \
-        "$HOME/.config/noctalia" \
-        "$HOME/.config/umbriel" \
         "$HOME/.ssh" \
         "$HOME/.local/share/applications" \
         "$HOME/Pictures/Screenshots" \
@@ -357,149 +386,55 @@ deploy_dotfiles() {
     log "Checking dotfiles for Stow conflicts"
     stow --simulate --verbose=1 "${stow_options[@]}" \
         --restow "${stow_packages[@]}"
-
-    log "Deploying ${#stow_packages[@]} dotfile packages"
-    stow "${stow_options[@]}" --restow "${stow_packages[@]}"
 }
 
-configure_network_printing() {
-    require_command awk
-    require_command cmp
-    require_command grep
-    require_command mktemp
-    require_file "$NSSWITCH_CONFIG"
+deploy_dotfiles() {
+    local -a stow_packages=()
+    load_stow_packages stow_packages
 
-    local nsswitch_tmp
-    nsswitch_tmp=$(mktemp)
-
-    if ! awk '
-        BEGIN { hosts_lines = 0 }
-
-        $1 == "hosts:" {
-            hosts_lines += 1
-            output = "hosts:"
-            inserted = 0
-
-            for (field = 2; field <= NF; field += 1) {
-                if ($field == "mdns_minimal") {
-                    if ($(field + 1) == "[NOTFOUND=return]") {
-                        field += 1
-                    }
-                    continue
-                }
-
-                if (!inserted &&
-                    ($field == "resolve" || $field == "dns" ||
-                        $field ~ /^#/)) {
-                    output = output " mdns_minimal [NOTFOUND=return]"
-                    inserted = 1
-                }
-
-                output = output " " $field
-            }
-
-            if (!inserted) {
-                output = output " mdns_minimal [NOTFOUND=return]"
-            }
-
-            print output
-            next
-        }
-
-        { print }
-
-        END {
-            if (hosts_lines != 1) {
-                exit 1
-            }
-        }
-    ' "$NSSWITCH_CONFIG" > "$nsswitch_tmp"; then
-        rm -f "$nsswitch_tmp"
-        die "Expected exactly one hosts entry in $NSSWITCH_CONFIG."
-    fi
-
-    if ! grep -Eq \
-        '^hosts:.*(^|[[:space:]])mdns_minimal[[:space:]]+\[NOTFOUND=return\]' \
-        "$nsswitch_tmp"; then
-        rm -f "$nsswitch_tmp"
-        die "Could not add mDNS hostname resolution to $NSSWITCH_CONFIG."
-    fi
-
-    if cmp -s "$NSSWITCH_CONFIG" "$nsswitch_tmp"; then
-        log "mDNS hostname resolution is already configured"
-    else
-        log "Configuring mDNS hostname resolution"
-        if ! sudo install -C -m 0644 "$nsswitch_tmp" "$NSSWITCH_CONFIG"; then
-            rm -f "$nsswitch_tmp"
-            die "Could not install the updated $NSSWITCH_CONFIG."
-        fi
-    fi
-    rm -f "$nsswitch_tmp"
-
-    log "Allowing inbound mDNS discovery through UFW"
-    sudo ufw allow in proto udp to any port 5353 \
-        comment "mDNS printer discovery"
+    log "Deploying ${#stow_packages[@]} dotfile packages"
+    stow --dir="$STOW_DIR" --target="$HOME" --restow "${stow_packages[@]}"
 }
 
 check_display_manager_conflict() {
-    local display_manager_link=/etc/systemd/system/display-manager.service
-    local display_manager_target
-    local display_manager_unit
-
-    [[ -L $display_manager_link ]] || return 0
-
-    display_manager_target=$(readlink -e -- "$display_manager_link") || \
-        die "Could not resolve the existing display-manager.service alias."
-    display_manager_unit=${display_manager_target##*/}
-
-    [[ $display_manager_unit == greetd.service ]] || die \
-        "Another display manager owns display-manager.service ($display_manager_unit). Disable it before configuring greetd."
+    local manager
+    manager=$(systemctl show -P FragmentPath display-manager.service 2>/dev/null) || \
+        die "Could not inspect display-manager.service."
+    [[ -n $manager ]] || die "No display manager owns display-manager.service."
+    [[ ${manager##*/} == plasmalogin.service ]] || die \
+        "Another login manager owns display-manager.service ($manager); expected plasmalogin.service."
 }
 
 install_system_config() {
-    require_command getent
     require_command lpinfo
-    require_command noctalia-greeter-session
-    require_command start-umbriel
-    require_command ufw
 
-    getent passwd greeter >/dev/null || \
-        die "The greetd package did not create its greeter account."
-    getent group greeter >/dev/null || \
-        die "The greetd package did not create its greeter group."
-
-    log "Configuring Noctalia Greeter and greetd"
-    sudo install -C -D -m 0644 "$GREETD_CONFIG_SOURCE" "$GREETD_CONFIG_TARGET"
-    sudo install -C -D -m 0644 "$GREETD_PAM_SOURCE" "$GREETD_PAM_TARGET"
-    sudo install -d -m 0750 -o greeter -g greeter /var/lib/noctalia-greeter
-    sudo install -C -m 0640 -o greeter -g greeter \
-        "$GREETER_CONFIG_SOURCE" "$GREETER_CONFIG_TARGET"
-
-    configure_network_printing
-
-    log "Enabling UFW"
-    sudo ufw --force enable
-
-    log "Enabling desktop services"
+    log "Enabling shared desktop services"
     for unit in "${DESKTOP_SERVICES[@]}"; do
         sudo systemctl enable "$unit"
     done
-
-    # Start only the non-graphical printer-discovery services immediately. The
-    # greeter still waits until reboot so it cannot take over the active TTY.
     sudo systemctl start avahi-daemon.service cups.socket
-
-    for unit in "${DESKTOP_USER_SERVICES[@]}"; do
-        systemctl --user enable "$unit"
-    done
-
-    sudo systemctl enable greetd.service
-    sudo systemctl set-default graphical.target
-    reboot_recommended=true
 }
 
 install_synology_mounts() {
+    local automount
+    local mount_unit
+    local -a changed_automounts=()
+
     require_command mount.nfs
+    require_command cmp
+
+    for automount in "${SYNOLOGY_AUTOMOUNTS[@]}"; do
+        mount_unit=${automount%.automount}.mount
+        if ! cmp -s "$SYSTEMD_UNIT_DIR/$automount" "/etc/systemd/system/$automount" ||
+            ! cmp -s "$SYSTEMD_UNIT_DIR/$mount_unit" "/etc/systemd/system/$mount_unit"; then
+            if systemctl is-active --quiet "$mount_unit"; then
+                die "${mount_unit} is mounted while its unit has changed. Close files on the share, unmount it, and rerun the bootstrap."
+            fi
+            if systemctl is-active --quiet "$automount"; then
+                changed_automounts+=("$automount")
+            fi
+        fi
+    done
 
     log "Installing Synology systemd mount and automount units"
     sudo install -d -m 0755 \
@@ -515,10 +450,15 @@ install_synology_mounts() {
 
     sudo systemctl daemon-reload
     sudo systemctl enable --now "${SYNOLOGY_AUTOMOUNTS[@]}"
+    if ((${#changed_automounts[@]} > 0)); then
+        log "Restarting changed Synology automounts"
+        sudo systemctl restart "${changed_automounts[@]}"
+    fi
 }
 
 post_install_health_check() {
     local warning_count=0
+    local required_failure_count=0
     local source_path
     local relative_path
     local target_path
@@ -538,7 +478,6 @@ post_install_health_check() {
     local -a desktop_service_issues=()
     local -a stow_packages=()
     local printer_discovery_output
-    local validation_output
 
     log "Running post-install health checks"
 
@@ -558,15 +497,17 @@ post_install_health_check() {
         if ((${#missing_packages[@]} == 0)); then
             printf '  [ok] All manifest packages are installed.\n'
         else
-            printf '  [warn] Missing packages: %s\n' "${missing_packages[*]}"
+            printf '  [fail] Missing packages: %s\n' "${missing_packages[*]}"
             ((warning_count += 1))
+            ((required_failure_count += 1))
         fi
 
         if ((${#missing_flatpaks[@]} == 0)); then
             printf '  [ok] All manifest Flatpaks are installed.\n'
         else
-            printf '  [warn] Missing Flatpaks: %s\n' "${missing_flatpaks[*]}"
+            printf '  [fail] Missing Flatpaks: %s\n' "${missing_flatpaks[*]}"
             ((warning_count += 1))
+            ((required_failure_count += 1))
         fi
 
         # The single-quoted variable is expanded by Fish, not Bash.
@@ -576,102 +517,103 @@ post_install_health_check() {
             "$HYDRO_PLUGIN"; then
             printf '  [ok] Fisher and the Hydro prompt are installed.\n'
         else
-            printf '  [warn] Fisher or the Hydro prompt is unavailable.\n'
+            printf '  [fail] Fisher or the Hydro prompt is unavailable.\n'
             ((warning_count += 1))
+            ((required_failure_count += 1))
         fi
     else
         printf '  [skip] Package and Flatpak checks were not requested.\n'
     fi
 
     if ! $skip_packages || ! $skip_system_config; then
-        for command in \
-            noctalia \
-            noctalia-greeter-session \
-            start-umbriel \
-            umbriel \
-            xwayland-satellite; do
-            command -v "$command" >/dev/null 2>&1 || \
-                missing_desktop_commands+=("$command")
-        done
-
         for path in \
-            /usr/share/wayland-sessions/umbriel.desktop \
-            /usr/share/xdg-desktop-portal/portals/umbriel.portal \
-            /usr/share/xdg-desktop-portal/umbriel-portals.conf; do
+            /usr/share/wayland-sessions/plasma.desktop \
+            /usr/share/xdg-desktop-portal/portals/kde.portal \
+            /usr/lib/pam.d/plasmalogin \
+            /usr/lib/systemd/system/plasmalogin.service; do
             [[ -f $path ]] || missing_desktop_commands+=("$path")
         done
-
+        if [[ $(systemctl show -P FragmentPath display-manager.service 2>/dev/null) != */plasmalogin.service ]] ||
+            ! systemctl is-enabled --quiet plasmalogin.service 2>/dev/null; then
+            missing_desktop_commands+=("display-manager.service:plasmalogin")
+        fi
         if ((${#missing_desktop_commands[@]} == 0)); then
-            printf '  [ok] Umbriel, Noctalia, Xwayland, and portal integration are installed.\n'
+            printf '  [ok] Plasma session, KDE portal, and login PAM are installed.\n'
         else
-            printf '  [warn] Missing desktop integration: %s\n' \
-                "${missing_desktop_commands[*]}"
+            printf '  [fail] Missing KDE integration: %s\n' "${missing_desktop_commands[*]}"
             ((warning_count += 1))
+            ((required_failure_count += 1))
         fi
     fi
 
+    if [[ ${XDG_CURRENT_DESKTOP:-} == *KDE* ]]; then
+        printf '  [ok] Current session reports KDE.\n'
+        if command -v busctl >/dev/null 2>&1 &&
+            busctl --user --no-pager status org.freedesktop.impl.portal.desktop.kde >/dev/null 2>&1; then
+            printf '  [ok] KDE portal is available on the user bus.\n'
+        else
+            printf '  [warn] KDE portal is unavailable on the user bus.\n'
+            ((warning_count += 1))
+        fi
+        if command -v busctl >/dev/null 2>&1 &&
+            busctl --user --no-pager status org.freedesktop.secrets 2>/dev/null |
+                grep -qi ksecretd; then
+            printf '  [ok] KWallet Secret Service is available on the user bus.\n'
+        else
+            printf '  [warn] KWallet Secret Service is unavailable on the user bus.\n'
+            ((warning_count += 1))
+        fi
+    else
+        printf '  [note] Log into Plasma to check the session and KWallet Secret Service.\n'
+    fi
+
+    if ! $skip_packages; then
+        local mime desktop
+        for mime in inode/directory application/pdf image/png audio/mpeg video/mp4 application/zip x-scheme-handler/https text/plain; do
+            if $skip_dotfiles && [[ $mime == audio/mpeg ]]; then
+                continue
+            fi
+            case $mime in
+                inode/directory) desktop=org.kde.dolphin.desktop ;;
+                application/pdf) desktop=org.kde.okular.desktop ;;
+                image/png) desktop=org.kde.gwenview.desktop ;;
+                audio/mpeg) desktop=cliamp.desktop ;;
+                video/mp4) desktop=org.kde.haruna.desktop ;;
+                application/zip) desktop=org.kde.ark.desktop ;;
+                x-scheme-handler/https) desktop=brave-origin.desktop ;;
+                text/plain) desktop=dev.zed.Zed.desktop ;;
+            esac
+            [[ $(xdg-mime query default "$mime") == "$desktop" ]] || \
+                desktop_service_issues+=("MIME:$mime")
+        done
+    fi
+
     if ! $skip_system_config; then
-        for unit in "${DESKTOP_SERVICES[@]}" greetd.service; do
+        for unit in "${DESKTOP_SERVICES[@]}"; do
             systemctl is-enabled --quiet "$unit" 2>/dev/null || \
                 desktop_service_issues+=("$unit")
         done
 
-        for unit in "${DESKTOP_USER_SERVICES[@]}"; do
-            systemctl --user is-enabled --quiet "$unit" 2>/dev/null || \
-                desktop_service_issues+=("user:$unit")
-        done
+    fi
 
-        if [[ $(systemctl get-default 2>/dev/null) != graphical.target ]]; then
-            desktop_service_issues+=("default-target:graphical.target")
-        fi
-
+    if ! $skip_packages || ! $skip_system_config; then
         if ((${#desktop_service_issues[@]} == 0)); then
-            printf '  [ok] Noctalia Greeter and desktop services are enabled.\n'
+            printf '  [ok] Shared desktop services and KDE MIME defaults are configured.\n'
         else
-            printf '  [warn] Desktop services not enabled: %s\n' \
+            printf '  [fail] Desktop service or MIME issues: %s\n' \
                 "${desktop_service_issues[*]}"
             ((warning_count += 1))
+            ((required_failure_count += 1))
         fi
+    fi
 
-        if grep -Eq \
-            '^hosts:.*(^|[[:space:]])mdns_minimal[[:space:]]+\[NOTFOUND=return\]' \
-            "$NSSWITCH_CONFIG"; then
-            printf '  [ok] mDNS hostname resolution is configured.\n'
-        else
-            printf '  [warn] mDNS hostname resolution is not configured.\n'
-            ((warning_count += 1))
-        fi
-
+    if ! $skip_system_config; then
         if printer_discovery_output=$(lpinfo \
             --include-schemes dnssd --timeout 15 -v 2>/dev/null) &&
             grep -Eq 'dnssd://.*\._ipps?\._tcp' <<< "$printer_discovery_output"; then
             printf '  [ok] A driverless network printer was discovered.\n'
         else
             printf '  [note] No DNS-SD printer is currently visible; it may be offline.\n'
-        fi
-    fi
-
-    if ! $skip_dotfiles; then
-        if ! command -v umbriel >/dev/null 2>&1; then
-            printf '  [note] Umbriel is unavailable; configuration validation was skipped.\n'
-        elif validation_output=$(umbriel validate -c \
-            "$STOW_DIR/umbriel/.config/umbriel/config.toml" 2>&1); then
-            printf '  [ok] Checked-in Umbriel configuration is valid.\n'
-        else
-            printf '  [warn] Umbriel configuration validation failed:\n'
-            printf '         %s\n' "$validation_output"
-            ((warning_count += 1))
-        fi
-
-        if ! command -v noctalia >/dev/null 2>&1; then
-            printf '  [note] Noctalia is unavailable; configuration validation was skipped.\n'
-        elif validation_output=$(noctalia config validate \
-            "$STOW_DIR/noctalia/.config/noctalia/config.toml" 2>&1); then
-            printf '  [ok] Checked-in Noctalia configuration is valid.\n'
-        else
-            printf '  [warn] Noctalia configuration validation failed:\n'
-            printf '         %s\n' "$validation_output"
-            ((warning_count += 1))
         fi
     fi
 
@@ -694,8 +636,9 @@ post_install_health_check() {
         if ((${#mount_issues[@]} == 0)); then
             printf '  [ok] Synology automount units are active.\n'
         else
-            printf '  [warn] Inactive Synology automounts: %s\n' "${mount_issues[*]}"
+            printf '  [fail] Inactive Synology automounts: %s\n' "${mount_issues[*]}"
             ((warning_count += 1))
+            ((required_failure_count += 1))
         fi
     else
         printf '  [skip] Synology automount checks were not requested.\n'
@@ -723,8 +666,9 @@ post_install_health_check() {
         if ((${#stow_issues[@]} == 0)); then
             printf '  [ok] All managed dotfiles resolve to the repository.\n'
         else
-            printf '  [warn] Dotfiles not linked to the repository: %s\n' "${stow_issues[*]}"
+            printf '  [fail] Dotfiles not linked to the repository: %s\n' "${stow_issues[*]}"
             ((warning_count += 1))
+            ((required_failure_count += 1))
         fi
     else
         printf '  [skip] Dotfile link checks were not requested.\n'
@@ -745,8 +689,6 @@ post_install_health_check() {
     if [[ ! -d /usr/lib/modules/$(uname -r) ]]; then
         printf '  [warn] The running kernel no longer has installed modules; reboot recommended.\n'
         ((warning_count += 1))
-    elif $reboot_recommended; then
-        printf '  [note] Reboot to start Noctalia Greeter and the Umbriel session.\n'
     elif $logout_recommended; then
         printf '  [note] Log out and back in to use Fish as the login shell.\n'
     else
@@ -756,7 +698,11 @@ post_install_health_check() {
     if ((warning_count == 0)); then
         printf '  Health check completed without warnings.\n'
     else
-        printf '  Health check completed with %s warning group(s).\n' "$warning_count"
+        printf '  Health check completed with %s warning or failure group(s).\n' "$warning_count"
+    fi
+
+    if ((required_failure_count > 0)); then
+        die "Bootstrap left $required_failure_count required health check group(s) unresolved."
     fi
 }
 
@@ -768,11 +714,18 @@ main() {
         sudo -v
     fi
 
+    if ! $skip_packages; then
+        install_bootstrap_dependencies
+    fi
+
+    if ! $skip_dotfiles; then
+        check_stow_conflicts
+    fi
+
     if $skip_packages; then
         log "Skipping packages, Flatpaks, and user environment setup"
     else
         install_packages
-        configure_user_environment
     fi
 
     if $skip_dotfiles; then
@@ -782,6 +735,7 @@ main() {
     fi
 
     if ! $skip_packages; then
+        configure_user_environment
         configure_fish_plugins
     fi
 
@@ -805,8 +759,8 @@ main() {
     printf '  Dotfiles:              %s\n' "$($skip_dotfiles && printf skipped || printf deployed)"
     printf '  System configuration:  %s\n' "$($skip_system_config && printf skipped || printf installed)"
     if ! $skip_system_config; then
-        printf '  Desktop session:       Umbriel + Noctalia (starts after reboot)\n'
-        printf '  Display manager:       Noctalia Greeter via greetd\n'
+        printf '  Desktop session:       Installer Plasma session\n'
+        printf '  Display manager:       Plasma Login Manager\n'
     fi
     if $skip_mounts; then
         printf '  Synology mounts:       skipped\n'

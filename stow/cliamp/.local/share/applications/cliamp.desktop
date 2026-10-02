@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=cliamp
+Comment=Play audio in a terminal
+Exec=konsole -e cliamp %f
+Icon=audio-x-generic
+Terminal=false
+Categories=AudioVideo;Audio;Music;Player;
+MimeType=audio/flac;audio/mp4;audio/mpeg;audio/ogg;audio/x-vorbis+ogg;audio/x-wav;
