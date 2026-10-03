@@ -1,0 +1,15 @@
+[Desktop Entry]
+Type=Application
+Name=Waydroid
+GenericName=Android Container
+Comment=Open the Waydroid Android interface
+Exec=waydroid show-full-ui
+Icon=waydroid
+Categories=X-WayDroid-App;Utility;
+Terminal=false
+Actions=stop;
+
+[Desktop Action stop]
+Name=Stop Waydroid Session
+Exec=waydroid session stop
+Icon=waydroid

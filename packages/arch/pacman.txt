@@ -7,6 +7,7 @@ cachy-update
 cachyos-gaming-meta
 calibre
 cups
+curl
 ddcutil
 expac
 eza

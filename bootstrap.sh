@@ -7,10 +7,20 @@ readonly REPO_DIR
 readonly PACMAN_MANIFEST="$REPO_DIR/packages/arch/pacman.txt"
 readonly AUR_MANIFEST="$REPO_DIR/packages/arch/aur.txt"
 readonly FLATPAK_MANIFEST="$REPO_DIR/packages/flatpak.txt"
+readonly HOUDINI_REQUIREMENTS="$REPO_DIR/packages/waydroid-script-requirements.lock.txt"
 readonly SYSTEMD_UNIT_DIR="$REPO_DIR/systemd/system"
 readonly STOW_DIR="$REPO_DIR/stow"
 readonly HYDRO_PLUGIN="jorgebucaran/hydro"
-readonly -a STOW_PACKAGES=(MangoHud brave cliamp environment.d fastfetch fish ghostty git jamesdsp ssh zed)
+readonly WAYDROID_IMAGE_DIR=/etc/waydroid-extra/images
+readonly WAYDROID_DATA_BACKUP="$REPO_DIR/waydroid-data.tar.zst"
+readonly WAYDROID_SYSTEM_URL=https://sourceforge.net/projects/waydroid/files/images/system/lineage/waydroid_x86_64/lineage-20.0-20260312-GAPPS-waydroid_x86_64-system.zip/download
+readonly WAYDROID_VENDOR_URL=https://sourceforge.net/projects/waydroid/files/images/vendor/waydroid_x86_64/lineage-20.0-20260312-MAINLINE-waydroid_x86_64-vendor.zip/download
+readonly WAYDROID_SYSTEM_SHA256=fe3387008d939b8a68e7cbe2c5c8f2b3237f1b075a44ad54ac3f2e2c4a3f6abb
+readonly WAYDROID_VENDOR_SHA256=1158bbb5244072ce8741757494e3ac5f3177d5dfbbdc132e5e2cf1e616d10bd5
+readonly WAYDROID_SCRIPT_COMMIT=48dbfaf34a6ddbe78688c530f9ba1c26522aafb2
+readonly HOUDINI_URL=https://github.com/supremegamers/vendor_intel_proprietary_houdini/archive/2f8f088671182e17e67321e098e8411a3972a628.zip
+readonly HOUDINI_SHA256=2e82cdc88ddc4d418f7fb861aeebb7c49c83a91b97f57da10510b5e1146a4ed5
+readonly -a STOW_PACKAGES=(MangoHud brave cliamp codex environment.d fastfetch fish ghostty git jamesdsp ssh waydroid zed)
 readonly -a KDE_BASELINE=(cachyos-kde-settings plasma-desktop plasma-workspace plasma-login-manager xdg-desktop-portal xdg-desktop-portal-kde kwallet-pam)
 
 readonly -a DESKTOP_SERVICES=(
@@ -53,10 +63,10 @@ usage() {
     cat <<'EOF'
 Usage: ./bootstrap.sh [OPTIONS]
 
-Restore packages, Flatpaks, dotfiles, system configuration, and Synology automounts on CachyOS.
+Restore packages, Flatpaks, dotfiles, Waydroid, system configuration, and Synology automounts on CachyOS.
 
 Options:
-  --skip-packages       Skip packages, Flatpaks, and user environment setup
+  --skip-packages       Skip packages, Flatpaks, Waydroid, and user environment setup
   --skip-dotfiles       Skip GNU Stow dotfile deployment
   --skip-system-config  Skip printer discovery and shared service setup
   --skip-mounts         Skip Synology systemd unit installation
@@ -167,11 +177,20 @@ preflight() {
         require_command awk
         require_command chsh
         require_command getent
+        require_command mktemp
+        require_command readlink
+        require_command sha256sum
+        require_command stat
+        require_command tar
+        require_command zstd
+        require_command mountpoint
+        require_command unzip
         require_command xdg-mime
         require_command xdg-user-dirs-update
         require_file "$PACMAN_MANIFEST"
         require_file "$AUR_MANIFEST"
         require_file "$FLATPAK_MANIFEST"
+        require_file "$HOUDINI_REQUIREMENTS"
         load_manifest "$AUR_MANIFEST" aur_packages
         if ((${#aur_packages[@]} > 0)); then
             require_command paru
@@ -240,6 +259,7 @@ install_packages() {
         paru -S --needed "${aur_packages[@]}"
     fi
 
+    require_command curl
     log "Configuring the system-wide Flathub remote"
     sudo flatpak remote-add --system --if-not-exists \
         flathub https://dl.flathub.org/repo/flathub.flatpakrepo
@@ -248,6 +268,262 @@ install_packages() {
         log "Installing or updating ${#flatpak_apps[@]} Flatpak applications"
         sudo flatpak install --system --or-update flathub "${flatpak_apps[@]}"
     fi
+}
+
+sha256_matches() {
+    local file=$1
+    local expected=$2
+    [[ -f $file ]] && [[ $(sha256sum "$file" | awk '{ print $1 }') == "$expected" ]]
+}
+
+houdini_installed() {
+    local overlay=/var/lib/waydroid/overlay/system
+    sha256_matches "$overlay/bin/houdini" 5545833168adcf5e0a79d92cabc21bb1774845d8a2c9cd089641b3adcc317a72 &&
+        sha256_matches "$overlay/bin/houdini64" f815ccee39d410c8b334dc1d2239508ff488141968c9f82f4764e7d83322fb0f &&
+        sha256_matches "$overlay/lib/libhoudini.so" bfdad39a4b658fdd7e03f2638d6ec314a8983ec7ec2cd55def510d31958d8489 &&
+        sha256_matches "$overlay/lib64/libhoudini.so" 5ef64035ec89bca3d5e33b9f3b6556f98f6c11d11957387d403ae4a4d7cc40ec &&
+        [[ -d $overlay/lib/arm && -d $overlay/lib64/arm64 ]] &&
+        [[ -f $overlay/etc/init/houdini.rc ]] &&
+        grep -Fxq 'ro.dalvik.vm.native.bridge = libhoudini.so' /var/lib/waydroid/waydroid.cfg
+}
+
+install_libhoudini() {
+    require_command git
+    require_command uv
+    require_command curl
+    require_command sha256sum
+    require_command stat
+    [[ $(uname -m) == x86_64 ]] || die "libhoudini requires an x86_64 host."
+    grep -Fxq 'mount_overlays = True' /var/lib/waydroid/waydroid.cfg || die \
+        "libhoudini setup requires Waydroid overlay mounts."
+
+    if houdini_installed; then
+        log "The pinned libhoudini installation is already present"
+        return
+    fi
+
+    if systemctl is-active --quiet waydroid-container.service; then
+        log "Stopping Waydroid before installing libhoudini"
+        if waydroid status | grep -Eq 'Session:[[:space:]]*RUNNING'; then
+            waydroid session stop
+        fi
+        sudo systemctl stop waydroid-container.service
+    fi
+
+    local houdini_cache=$HOME/.cache/waydroid-script/downloads/libhoudini.zip
+    local download_file
+    if ! sha256_matches "$houdini_cache" "$HOUDINI_SHA256"; then
+        download_file=$(mktemp)
+        log "Downloading the pinned Android 13 libhoudini archive"
+        curl -fL --retry 3 -o "$download_file" "$HOUDINI_URL"
+        sha256_matches "$download_file" "$HOUDINI_SHA256" || die \
+            "Downloaded libhoudini archive does not match the pinned SHA-256."
+        install -d -m 0755 "${houdini_cache%/*}"
+        install -m 0644 "$download_file" "$houdini_cache"
+        rm -- "$download_file"
+    fi
+
+    # Upstream extracts to this fixed path. Keep it inaccessible to other users
+    # while its root-run installer writes the Android libraries there.
+    if [[ -e /tmp/houdiniunpack || -L /tmp/houdiniunpack ]]; then
+        [[ ! -L /tmp/houdiniunpack && -d /tmp/houdiniunpack ]] &&
+            [[ $(stat -c '%u:%a' /tmp/houdiniunpack) == 0:700 ]] || die \
+            "Existing /tmp/houdiniunpack is not a private root-owned directory."
+    else
+        sudo install -d -m 0700 /tmp/houdiniunpack
+    fi
+
+    (
+        local checkout_dir
+        checkout_dir=$(mktemp -d)
+        trap 'rm -rf -- "$checkout_dir"' EXIT
+        log "Checking out the pinned Waydroid extras script"
+        git clone --quiet --filter=blob:none \
+            https://github.com/casualsnek/waydroid_script.git \
+            "$checkout_dir/waydroid_script"
+        git -C "$checkout_dir/waydroid_script" checkout --quiet --detach \
+            "$WAYDROID_SCRIPT_COMMIT"
+        [[ $(git -C "$checkout_dir/waydroid_script" rev-parse HEAD) == \
+            "$WAYDROID_SCRIPT_COMMIT" ]] || die "Waydroid extras checkout does not match the pinned commit."
+        cd "$checkout_dir/waydroid_script"
+        log "Installing libhoudini with the pinned script and uv"
+        sudo install -d -m 0755 /var/cache/kde-bootstrap-uv
+        sudo env XDG_CACHE_HOME="$HOME/.cache" \
+            UV_CACHE_DIR=/var/cache/kde-bootstrap-uv \
+            PYTHONDONTWRITEBYTECODE=1 \
+            uv run --no-project --no-managed-python --no-build \
+            --python /usr/bin/python3 \
+            --with-requirements "$HOUDINI_REQUIREMENTS" -- \
+            python3 main.py install libhoudini
+    )
+    sudo rm -r -- /tmp/houdiniunpack
+    houdini_installed || die "libhoudini installation did not produce the expected files and Waydroid setting."
+}
+
+restore_waydroid_data() {
+    [[ -f $WAYDROID_DATA_BACKUP ]] || {
+        log "No Waydroid data backup found beside bootstrap.sh"
+        return
+    }
+
+    local state_dir=${XDG_DATA_HOME:-$HOME/.local/share}/waydroid
+    local data_dir=$state_dir/data
+    local restore_marker=$state_dir/.kde-bootstrap-restored.sha256
+    local archive_hash
+    archive_hash=$(sha256sum "$WAYDROID_DATA_BACKUP" | awk '{print $1}')
+
+    if [[ -d $data_dir && -f $restore_marker ]] &&
+        [[ -n $(find "$data_dir" -mindepth 1 -maxdepth 1 -print -quit) ]] &&
+        [[ $(< "$restore_marker") == "$archive_hash" ]]; then
+        log "This Waydroid data backup has already been restored"
+        return
+    fi
+
+    [[ ! -L $data_dir ]] || die "Waydroid data path is a symlink: $data_dir"
+    [[ ! -e $data_dir || -d $data_dir ]] || die "Waydroid data path is not a directory: $data_dir"
+
+    if [[ -d $data_dir ]] &&
+        [[ -n $(find "$data_dir" -mindepth 1 -maxdepth 1 -print -quit) ]]; then
+        local answer
+        if ! ( : < /dev/tty ) 2>/dev/null; then
+            warn "Waydroid already has data; no terminal is available to approve restoring the backup."
+            return
+        fi
+        printf 'Waydroid already has user data at %s. Restore the backup and replace it? [y/N] ' "$data_dir" > /dev/tty
+        IFS= read -r answer < /dev/tty || answer=
+        if [[ ! $answer =~ ^[Yy]([Ee][Ss])?$ ]]; then
+            log "Keeping the existing Waydroid data"
+            return
+        fi
+    fi
+
+    log "Checking the Waydroid data backup"
+    zstd -t -- "$WAYDROID_DATA_BACKUP"
+    # The backup command creates one top-level data directory. Reject any
+    # unexpected paths before extracting an archive with elevated privileges.
+    local member manifest invalid_member=
+    manifest=$(mktemp)
+    if ! tar --zstd -tf "$WAYDROID_DATA_BACKUP" > "$manifest"; then
+        rm -f -- "$manifest"
+        die "Cannot list the Waydroid backup contents."
+    fi
+    while IFS= read -r member; do
+        if [[ $member != data && $member != data/ && $member != data/* ]] ||
+            [[ $member == *'/../'* || $member == */.. || $member == */./* ]]; then
+            invalid_member=$member
+            break
+        fi
+    done < "$manifest"
+    rm -f -- "$manifest"
+    [[ -z $invalid_member ]] || die "Unexpected or unsafe path in Waydroid backup: $invalid_member"
+
+    if waydroid status | grep -Eq 'Session:[[:space:]]*RUNNING'; then
+        waydroid session stop
+    fi
+    if systemctl is-active --quiet waydroid-container.service; then
+        sudo systemctl stop waydroid-container.service
+    fi
+    mountpoint -q "$data_dir" && die "Waydroid data is still mounted: $data_dir"
+
+    install -d -m 0700 "$state_dir"
+    local staging_dir
+    staging_dir=$(mktemp -d "$state_dir/.kde-bootstrap-restore.XXXXXXXX")
+    log "Restoring Waydroid data from $WAYDROID_DATA_BACKUP"
+    if ! sudo tar --zstd --acls --xattrs --xattrs-include='*' --numeric-owner -xf "$WAYDROID_DATA_BACKUP" -C "$staging_dir"; then
+        warn "Restore failed; incomplete files remain at $staging_dir"
+        return 1
+    fi
+    [[ -d $staging_dir/data ]] || die "Waydroid backup has no data directory."
+    [[ $(stat -c %u "$staging_dir/data") == "$(id -u)" ]] || die \
+        "Waydroid backup belongs to another host UID; data remains at $staging_dir."
+
+    if [[ -d $data_dir ]]; then
+        local previous_dir
+        previous_dir=$(mktemp -d "$state_dir/.kde-bootstrap-previous.XXXXXXXX")
+        rmdir "$previous_dir"
+        mv -- "$data_dir" "$previous_dir"
+        log "Previous Waydroid data saved at $previous_dir"
+    fi
+    mv -- "$staging_dir/data" "$data_dir"
+    rmdir "$staging_dir"
+    printf '%s\n' "$archive_hash" > "$restore_marker"
+    log "Waydroid data restored"
+}
+
+configure_waydroid() {
+    require_command waydroid
+    require_command waydroid-nvidia-setup
+    require_command curl
+    require_command unzip
+    require_command sha256sum
+    require_command uv
+    if [[ ! -r /proc/driver/nvidia/version ]] ||
+        ! grep -Fq 'Open Kernel Module' /proc/driver/nvidia/version; then
+        die "Waydroid NVIDIA requires the NVIDIA open kernel modules."
+    fi
+    if [[ ! -r /sys/module/nvidia_drm/parameters/modeset ]] ||
+        [[ $(< /sys/module/nvidia_drm/parameters/modeset) != Y ]]; then
+        die "Waydroid NVIDIA requires nvidia-drm.modeset=1."
+    fi
+
+    local system_image=$WAYDROID_IMAGE_DIR/system.img
+    local vendor_image=$WAYDROID_IMAGE_DIR/vendor.img
+    local config=/var/lib/waydroid/waydroid.cfg
+    local image_cache
+
+    if [[ -f $config ]] &&
+        ! grep -Fxq "images_path = $WAYDROID_IMAGE_DIR" "$config"; then
+        die "Waydroid already uses another image path. Review $config before changing its images."
+    fi
+
+    if ! sha256_matches "$system_image" "$WAYDROID_SYSTEM_SHA256" ||
+        ! sha256_matches "$vendor_image" "$WAYDROID_VENDOR_SHA256"; then
+        [[ ! -f $config ]] || die \
+            "Initialized Waydroid images differ from the pinned March 2026 images; leaving existing installation intact."
+
+        image_cache=$(mktemp -d)
+        log "Downloading the pinned Waydroid GAPPS and MAINLINE images"
+        curl -fL --retry 3 -o "$image_cache/system.zip" "$WAYDROID_SYSTEM_URL"
+        curl -fL --retry 3 -o "$image_cache/vendor.zip" "$WAYDROID_VENDOR_URL"
+        unzip -p "$image_cache/system.zip" system.img > "$image_cache/system.img"
+        unzip -p "$image_cache/vendor.zip" vendor.img > "$image_cache/vendor.img"
+        sha256_matches "$image_cache/system.img" "$WAYDROID_SYSTEM_SHA256" || \
+            die "Downloaded Waydroid system image does not match the pinned SHA-256."
+        sha256_matches "$image_cache/vendor.img" "$WAYDROID_VENDOR_SHA256" || \
+            die "Downloaded Waydroid vendor image does not match the pinned SHA-256."
+
+        sudo install -d -m 0755 "$WAYDROID_IMAGE_DIR"
+        sudo install -m 0644 "$image_cache/system.img" "$system_image"
+        sudo install -m 0644 "$image_cache/vendor.img" "$vendor_image"
+        rm -r -- "$image_cache"
+    else
+        log "Pinned Waydroid images are already installed"
+    fi
+
+    if [[ ! -f $config ]]; then
+        log "Initializing Waydroid with the pinned GAPPS image"
+        sudo waydroid init -f -s GAPPS
+    fi
+
+    # The NVIDIA setup tool checks this default path even when Waydroid uses
+    # the documented custom-image directory above.
+    if [[ -e /var/lib/waydroid/images/vendor.img ||
+          -L /var/lib/waydroid/images/vendor.img ]] &&
+        [[ $(readlink -f /var/lib/waydroid/images/vendor.img) != "$vendor_image" ]]; then
+        die "Waydroid's default vendor image path already points elsewhere."
+    fi
+    sudo install -d -m 0755 /var/lib/waydroid/images
+    if [[ ! -L /var/lib/waydroid/images/vendor.img ]]; then
+        sudo ln -s "$vendor_image" /var/lib/waydroid/images/vendor.img
+    fi
+
+    log "Configuring Waydroid NVIDIA acceleration"
+    sudo waydroid-nvidia-setup
+    install_libhoudini
+    restore_waydroid_data
+    sudo systemctl enable --now waydroid-container.service
+    # It starts at the next login, after the udev rule grants /dev/udmabuf access.
+    systemctl --user enable wd-venus.service
 }
 
 configure_user_environment() {
@@ -376,6 +652,7 @@ check_stow_conflicts() {
     # Keep these as real directories so applications can create unmanaged
     # runtime files alongside the individually Stow-managed user files.
     mkdir -p \
+        "$HOME/.codex" \
         "$HOME/.config/jamesdsp/irs" \
         "$HOME/.config/jamesdsp/presets" \
         "$HOME/.ssh" \
@@ -506,6 +783,20 @@ post_install_health_check() {
             printf '  [ok] All manifest Flatpaks are installed.\n'
         else
             printf '  [fail] Missing Flatpaks: %s\n' "${missing_flatpaks[*]}"
+            ((warning_count += 1))
+            ((required_failure_count += 1))
+        fi
+
+        if [[ -f /var/lib/waydroid/waydroid.cfg ]] &&
+            grep -Fxq "images_path = $WAYDROID_IMAGE_DIR" /var/lib/waydroid/waydroid.cfg &&
+            [[ -f $WAYDROID_IMAGE_DIR/system.img ]] &&
+            [[ -f $WAYDROID_IMAGE_DIR/vendor.img ]] &&
+            houdini_installed &&
+            systemctl is-enabled --quiet waydroid-container.service &&
+            systemctl --user is-enabled --quiet wd-venus.service; then
+            printf '  [ok] Waydroid NVIDIA, libhoudini, and services are configured.\n'
+        else
+            printf '  [fail] Waydroid NVIDIA, libhoudini, or services are missing.\n'
             ((warning_count += 1))
             ((required_failure_count += 1))
         fi
@@ -726,6 +1017,7 @@ main() {
         log "Skipping packages, Flatpaks, and user environment setup"
     else
         install_packages
+        configure_waydroid
     fi
 
     if $skip_dotfiles; then

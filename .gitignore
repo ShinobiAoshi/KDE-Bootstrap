@@ -2,3 +2,6 @@
 .zcompdump*
 .zsh-update
 .zhistory
+
+# Private Android data backup used by bootstrap.sh
+/waydroid-data.tar.zst

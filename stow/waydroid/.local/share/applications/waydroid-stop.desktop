@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Stop Waydroid
+Comment=Stop the Waydroid Android session
+Exec=waydroid session stop
+Icon=waydroid
+Categories=Utility;
+Terminal=false

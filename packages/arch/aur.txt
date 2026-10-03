@@ -11,4 +11,5 @@ rustdesk-bin
 sgdboop-bin
 termius
 upscayl-bin
+waydroid-nvidia-bin
 xivlauncher-rb
