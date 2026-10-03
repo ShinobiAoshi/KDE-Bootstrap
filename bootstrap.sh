@@ -372,15 +372,15 @@ restore_waydroid_data() {
     local archive_hash
     archive_hash=$(sha256sum "$WAYDROID_DATA_BACKUP" | awk '{print $1}')
 
+    [[ ! -L $data_dir ]] || die "Waydroid data path is a symlink: $data_dir"
+    [[ ! -e $data_dir || -d $data_dir ]] || die "Waydroid data path is not a directory: $data_dir"
+
     if [[ -d $data_dir && -f $restore_marker ]] &&
         [[ -n $(find "$data_dir" -mindepth 1 -maxdepth 1 -print -quit) ]] &&
         [[ $(< "$restore_marker") == "$archive_hash" ]]; then
         log "This Waydroid data backup has already been restored"
         return
     fi
-
-    [[ ! -L $data_dir ]] || die "Waydroid data path is a symlink: $data_dir"
-    [[ ! -e $data_dir || -d $data_dir ]] || die "Waydroid data path is not a directory: $data_dir"
 
     if [[ -d $data_dir ]] &&
         [[ -n $(find "$data_dir" -mindepth 1 -maxdepth 1 -print -quit) ]]; then
